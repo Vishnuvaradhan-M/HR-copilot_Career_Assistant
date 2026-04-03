@@ -1,4 +1,4 @@
-"""Evidence-first RAG retriever with LLM-optional mode support.
+"""Evidence-first RAG retriever with Groq LLM integration.
 
 This module implements a safe, evidence-first retrieval+generation pipeline:
 - Dense retrieval via FAISS (top 25 semantic matches)
@@ -6,12 +6,11 @@ This module implements a safe, evidence-first retrieval+generation pipeline:
 - Hybrid union + deduplication ensures legally critical clauses ranked
 - Rerank combined candidates with CrossEncoder
 - LEXICAL-SAFE SELECTION: force-include lexical-exact hits (≥2 keywords) in top evidence
-- LLM-ENHANCED MODE: Call Ollama if available for refined answers
-- EVIDENCE-ONLY MODE: Accept high-confidence (≥0.65) answers when LLM unavailable (via sigmoid confidence)
+- LLM-ENHANCED MODE: Call Groq API for refined answers
 - Confidence derived from sigmoid(reranker_score) mapping to [0,1]
 - Returns strict JSON shape and degrades safely on failures
 
-System supports both LLM-enhanced and evidence-only modes gracefully.
+System provides LLM-enhanced responses with Groq backend.
 Do NOT change ingest, FAISS, or evaluator logic. This file is self-contained.
 """
 import os
@@ -27,17 +26,10 @@ logger = logging.getLogger(__name__)
 from .faiss_store import query_faiss
 from .models import get_conn
 
-# LLM Configuration
-LLM_PROVIDER = os.getenv("LLM_PROVIDER", "groq").lower()
-
-# Groq settings
+# Groq Configuration (Primary LLM provider)
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
 GROQ_MODEL = os.getenv("GROQ_MODEL", "mixtral-8x7b-32768")
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
-
-# Ollama settings (fallback)
-OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
-OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "gemma:2b")
 
 # Lazy-load reranker (ms-marco cross-encoder)
 _reranker = None
@@ -93,27 +85,9 @@ def call_groq(system: str, user: str) -> str:
     return r.json()["choices"][0]["message"]["content"].strip()
 
 
-def call_ollama(system: str, user: str) -> str:
-    """Call Ollama chat endpoint and return assistant content."""
-    payload = {
-        "model": OLLAMA_MODEL,
-        "stream": False,
-        "messages": [
-            {"role": "system", "content": system},
-            {"role": "user", "content": user},
-        ],
-    }
-    r = requests.post(f"{OLLAMA_URL}/api/chat", json=payload, timeout=60)
-    r.raise_for_status()
-    return r.json()["message"]["content"].strip()
-
-
 def call_llm(system: str, user: str) -> str:
-    """Call the configured LLM provider (Groq or Ollama)."""
-    if LLM_PROVIDER == "groq":
-        return call_groq(system, user)
-    else:
-        return call_ollama(system, user)
+    """Call Groq API for LLM responses."""
+    return call_groq(system, user)
 
 
 def _fetch_page_for_chunk(chunk_id: str) -> int:
@@ -419,7 +393,7 @@ def rag_answer(query: str, role_tag: str = None, goal: str = None, top_k: int = 
         llm_available = True
         try:
             llm_answer = call_llm(SYSTEM_PROMPT, user_prompt)
-            logger.info(f"LLM-enhanced mode: answer generated via {LLM_PROVIDER.upper()}")
+            logger.info("LLM-enhanced mode: answer generated via Groq")
         except Exception as e:
             # LLM unavailable - prepare evidence-only mode
             llm_available = False

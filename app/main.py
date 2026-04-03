@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 UPLOAD_DIR = os.getenv("UPLOAD_DIR", "./uploads")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
-app = FastAPI(title="HR Copilot (MVP) - Groq/Ollama backend")
+app = FastAPI(title="HR Copilot - Career Assistant & HR Policy AI")
 
 init_sqlite()
 
